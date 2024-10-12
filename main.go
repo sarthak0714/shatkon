@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/huh"
@@ -15,7 +17,6 @@ type ProjectConfig struct {
 	ProjectName  string
 	Framework    string
 	Database     string
-	Auth         bool
 	Logging      bool
 }
 
@@ -55,6 +56,7 @@ func main() {
 			huh.NewSelect[string]().
 				Title("Choose a Go framework").
 				Options(
+					huh.NewOption("StdLib", "stdlib"),
 					huh.NewOption("Gin", "gin"),
 					huh.NewOption("Echo", "echo"),
 					huh.NewOption("Fiber", "fiber"),
@@ -76,11 +78,8 @@ func main() {
 				Value(&config.Database),
 		),
 
-		// Part 4: Middleware Options
+		// Middleware Options
 		huh.NewGroup(
-			huh.NewConfirm().
-				Title("Enable Authentication Middleware?").
-				Value(&config.Auth),
 			huh.NewConfirm().
 				Title("Enable Logging Middleware?").
 				Value(&config.Logging).
@@ -105,6 +104,7 @@ func main() {
 		fmt.Println("Error:", err)
 		os.Exit(1)
 	}
+	InitProject(config)
 
 	printProjectSummary(config)
 }
@@ -122,17 +122,14 @@ func printProjectSummary(config ProjectConfig) {
 		"Project Name: %s\n"+
 		"Framework: %s\n"+
 		"Database: %s\n"+
-		"Authentication Middleware: %s\n"+
 		"Logging Middleware: %s",
 		titleStyle.Render("Project Configuration Summary"),
 		keyword(config.GithubUserID),
 		keyword(config.ProjectName),
 		keyword(config.Framework),
 		keyword(config.Database),
-		keyword(fmt.Sprintf("%v", config.Auth)),
 		keyword(fmt.Sprintf("%v", config.Logging)),
 	)
-
 	fmt.Println(lipgloss.NewStyle().
 		Width(60).
 		BorderStyle(lipgloss.RoundedBorder()).
@@ -140,3 +137,80 @@ func printProjectSummary(config ProjectConfig) {
 		Padding(1, 2).
 		Render(sb.String()))
 }
+
+func InitProject(config ProjectConfig) error {
+	if err := exec.Command("mkdir", config.ProjectName).Run(); err != nil {
+		return fmt.Errorf("failed to create project directory: %w", err)
+	}
+
+	dirs := []string{
+		config.ProjectName + "/internal/adapters",
+		config.ProjectName + "/internal/config",
+		config.ProjectName + "/internal/core",
+		config.ProjectName + "/internal/adapters/handlers",
+		config.ProjectName + "/internal/adapters/repository",
+		config.ProjectName + "/internal/core/domain",
+		config.ProjectName + "/internal/core/ports",
+		config.ProjectName + "/internal/core/services",
+	}
+
+	for _, dir := range dirs {
+		if err := exec.Command("mkdir", "-p", dir).Run(); err != nil {
+			return fmt.Errorf("failed to create directory %s: %w", dir, err)
+		}
+	}
+
+	projectName := "github.com/" + config.GithubUserID + "/" + config.ProjectName
+
+	goInitCmd := exec.Command("go", "mod", "init", projectName)
+	goInitCmd.Dir = "./" + config.ProjectName
+	if err := goInitCmd.Run(); err != nil {
+		return fmt.Errorf("failed to initialize go module: %w", err)
+	}
+
+	gitInitCmd := exec.Command("git", "init")
+	gitInitCmd.Dir = "./" + config.ProjectName
+	if err := gitInitCmd.Run(); err != nil {
+		return fmt.Errorf("failed to initialize git repository: %w", err)
+	}
+	cfgFilePath := config.ProjectName + "/internal/config/config.go"
+
+	if err := CreateFile(cfgTemplate, cfgFilePath); err != nil {
+		return err
+	}
+	return nil
+}
+
+func CreateFile(content, filePath string) error {
+	// Create the directory if it doesn't exist
+	dir := filepath.Dir(filePath)
+	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
+		return err // Return the error if directory creation fails
+	}
+
+	// Create the file
+	file, err := os.Create(filePath)
+	if err != nil {
+		return err // Return the error instead of panicking
+	}
+	defer file.Close()
+
+	// Write the plain string content to the file
+	_, err = file.WriteString(content)
+	if err != nil {
+		return err // Return the error instead of panicking
+	}
+
+	return nil
+}
+
+const cfgTemplate = `
+package config
+
+type Config struct {}
+
+func LoadConfig() *Config {
+	return &Config{	}
+}
+
+`
