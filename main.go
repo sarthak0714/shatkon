@@ -71,7 +71,6 @@ func main() {
 				Title("Choose a database").
 				Options(
 					huh.NewOption("PostgreSQL", "postgresql"),
-					huh.NewOption("MySQL", "mysql"),
 					huh.NewOption("MongoDB", "mongodb"),
 					huh.NewOption("SQLite", "sqlite"),
 				).
@@ -111,12 +110,11 @@ func main() {
 	case "stdlib":
 		CreateFile(stdLibTemplate, mainPath)
 	case "echo":
-		if config.Logging == true {
+		if config.Logging {
 			addEchoLogger(config)
 			CreateFile(echoTemplateWithLogger, mainPath)
 		} else {
 			CreateFile(echoTemplate, mainPath)
-
 		}
 	case "gin":
 		CreateFile(ginTemplate, mainPath)
@@ -124,6 +122,17 @@ func main() {
 		CreateFile(chiTemplate, mainPath)
 	case "fiber":
 		CreateFile(fiberTempalte, mainPath)
+	}
+
+	dbFilepath := config.ProjectName + "/internal/adapters/repository/db.go"
+	switch config.Database {
+	case "sqlite":
+		CreateFile(sqliteTemplate, dbFilepath)
+	case "postgresql":
+		CreateFile(pgSqlTemplate, dbFilepath)
+	case "mongodb":
+		CreateFile(mongoDBTemplate, dbFilepath)
+
 	}
 
 	goModCmd := exec.Command("go", "mod", "tidy")
@@ -447,5 +456,95 @@ func main() {
     if err := http.ListenAndServe(":8080", mux); err != nil {
         fmt.Println("Error starting server:", err)
     }
+}
+`
+
+const sqliteTemplate = `
+package repositories
+
+type sqliteDB struct {
+	db *gorm.DB
+}
+
+// this will return a new sqlite struct
+func NewStore(connectionString string) (*sqliteDB, error) {
+	db, err := gorm.Open(sqlite.Open(connectionString), &gorm.Config{})
+	if err != nil {
+		return nil, err
+	}
+	return &sqliteDB{
+		db: db,
+	}, nil
+}
+
+`
+
+const pgSqlTemplate = `
+package repository
+
+import (
+	"fmt"
+	"time"
+
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+)
+
+type PGStore struct {
+	db *gorm.DB
+}
+
+func NewStore(dsn string) (*PGStore, error) {
+	// dsn := "host=localhost user=postgres dbname=postgres password=jomum port=5432 sslmode=disable"
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	if err != nil {
+		return nil, err
+	}
+	return &PGStore{
+		db: db,
+	}, nil
+}
+`
+
+const mongoDBTemplate = `
+package repository
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+type MongoStore struct {
+	client *mongo.Client
+	db     *mongo.Database
+}
+
+func NewMongoStore(dsn string, dbName string) (*MongoStore, error) {
+	clientOptions := options.Client().ApplyURI(dsn)
+	client, err := mongo.Connect(context.TODO(), clientOptions)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := client.Ping(context.TODO(), nil); err != nil {
+		return nil, fmt.Errorf("failed to connect to MongoDB: %w", err)
+	}
+
+	db := client.Database(dbName)
+
+	return &MongoStore{
+		client: client,
+		db:     db,
+	}, nil
+}
+
+func (store *MongoStore) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return store.client.Disconnect(ctx)
 }
 `
