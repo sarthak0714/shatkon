@@ -105,6 +105,32 @@ func main() {
 		os.Exit(1)
 	}
 	InitProject(config)
+	mainPath := config.ProjectName + "/cmd/main.go"
+
+	switch config.Framework {
+	case "stdlib":
+		CreateFile(stdLibTemplate, mainPath)
+	case "echo":
+		if config.Logging == true {
+			addEchoLogger(config)
+			CreateFile(echoTemplateWithLogger, mainPath)
+		} else {
+			CreateFile(echoTemplate, mainPath)
+
+		}
+	case "gin":
+		CreateFile(ginTemplate, mainPath)
+	case "chi":
+		CreateFile(chiTemplate, mainPath)
+	case "fiber":
+		CreateFile(fiberTempalte, mainPath)
+	}
+
+	goModCmd := exec.Command("go", "mod", "tidy")
+	goModCmd.Dir = "./" + config.ProjectName
+	if err := goModCmd.Run(); err != nil {
+		panic(err)
+	}
 
 	printProjectSummary(config)
 }
@@ -178,31 +204,125 @@ func InitProject(config ProjectConfig) error {
 	if err := CreateFile(cfgTemplate, cfgFilePath); err != nil {
 		return err
 	}
+
 	return nil
+
 }
 
 func CreateFile(content, filePath string) error {
 	// Create the directory if it doesn't exist
 	dir := filepath.Dir(filePath)
 	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
-		return err // Return the error if directory creation fails
+		return err
 	}
 
 	// Create the file
 	file, err := os.Create(filePath)
 	if err != nil {
-		return err // Return the error instead of panicking
+		return err
 	}
 	defer file.Close()
 
 	// Write the plain string content to the file
 	_, err = file.WriteString(content)
 	if err != nil {
-		return err // Return the error instead of panicking
+		return err
 	}
 
 	return nil
 }
+
+func addEchoLogger(cfg ProjectConfig) error {
+
+	filePath := cfg.ProjectName + "/pkg/utils/logger.go"
+	return CreateFile(loggerTemplate, filePath)
+}
+
+const loggerTemplate = `
+package utils
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/labstack/echo/v4"
+)
+
+const (
+	colorRed       = "\033[31m"
+	colorGreen     = "\033[32m"
+	colorYellow    = "\033[33m"
+	colorBlue      = "\033[34m"
+	colorPurple    = "\033[35m"
+	colorCyan      = "\033[36m"
+	colorGray      = "\033[37m"
+	colorReset     = "\033[0m"
+	colorLightCyan = "\033[96m"
+	colorMagenta   = "\033[35m"
+)
+
+// Returns color ASNII for the specified http status code
+func statusColor(code int) string {
+	switch {
+	case code >= 100 && code < 200:
+		return colorYellow
+	case code >= 200 && code < 300:
+		return colorGreen
+	case code >= 300 && code < 400:
+		return colorBlue
+	case code >= 400 && code < 500:
+		return colorRed
+	case code >= 500:
+		return colorPurple
+	default:
+		return colorReset
+	}
+}
+
+// Custom Middleware function for Pretty logging :).
+func CustomLogger() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			start := time.Now()
+
+			err := next(c)
+			if err != nil {
+				c.Error(err)
+			}
+
+			req := c.Request()
+			res := c.Response()
+
+			id := req.Header.Get(echo.HeaderXRequestID)
+			if id == "" {
+				id = res.Header().Get(echo.HeaderXRequestID)
+			}
+
+			logMessage := fmt.Sprintf("%s[%s]%s %s%s%s%s%s %s%s%s %s%s%d%s%s %s%v%s %s",
+				colorLightCyan, time.Now().Format("2006-01-02 15:04:05"), colorReset,
+				"\033[1m", colorGray, req.Method, colorReset, "\033[0m",
+				colorCyan, req.URL.Path, colorReset,
+				"\033[1m", statusColor(res.Status), res.Status, colorReset, "\033[0m",
+				colorGray, time.Since(start), colorReset,
+				id,
+			)
+
+			fmt.Println(logMessage)
+
+			return nil
+		}
+	}
+}
+
+// Custom Middleware logger to indicate the perodic fetch afetr completion
+func FetchLogger() {
+	logMessage := fmt.Sprintf("%s[%s]%s %s%s%s%s%s",
+		colorLightCyan, time.Now().Format("2006-01-02 15:04:05"), colorReset,
+		"\033[1m", colorMagenta, "API FETCHED", colorReset, "\033[0m",
+	)
+	fmt.Println(logMessage)
+}
+`
 
 const cfgTemplate = `
 package config
@@ -213,4 +333,119 @@ func LoadConfig() *Config {
 	return &Config{	}
 }
 
+`
+
+const echoTemplate = `
+package main
+
+import (
+	"net/http"
+	
+	"github.com/labstack/echo/v4"
+)
+
+func main() {
+	e := echo.New()
+	e.GET("/", func(c echo.Context) error {
+		return c.String(http.StatusOK, "Hello, World!")
+	})
+	e.Logger.Fatal(e.Start(":8080"))
+}
+`
+
+const echoTemplateWithLogger = `
+package main
+
+import (
+	"net/http"
+	
+	"github.com/labstack/echo/v4"
+)
+
+func main() {
+	e := echo.New()
+	e.HideBanner=true
+	e.Use(utils.CustomLogger())
+	e.GET("/", func(c echo.Context) error {
+		return c.String(http.StatusOK, "Hello, World!")
+	})
+	e.Logger.Fatal(e.Start(":8080"))
+}
+`
+
+const chiTemplate = `
+package main
+
+import (
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+)
+
+func main() {
+	r := chi.NewRouter()
+	r.Use(middleware.Logger)
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("works"))
+	})
+	http.ListenAndServe(":8080", r)
+}
+`
+
+const fiberTempalte = `
+import (
+    "log"
+
+    "github.com/gofiber/fiber/v2"
+)
+
+func main() {
+    app := fiber.New()
+
+    app.Get("/", func (c *fiber.Ctx) error {
+        return c.SendString("works")
+    })
+
+    log.Fatal(app.Listen(":8080"))
+}
+`
+const ginTemplate = `
+package main
+
+import "github.com/gin-gonic/gin"
+
+func main() {
+	r := gin.Default()
+	r.GET("/ping", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"message": "works",
+		})
+	})
+	r.Run() 
+}
+`
+
+const stdLibTemplate = `
+package main
+
+import (
+    "fmt"
+    "net/http"
+)
+
+
+
+func main() {
+    mux := http.NewServeMux()
+
+    mux.HandleFunc("/", func (w http.ResponseWriter, r *http.Request) {
+    		fmt.Fprintln(w, "Works")
+		},
+	)
+    fmt.Println("Server is running at http://localhost:8080")
+    if err := http.ListenAndServe(":8080", mux); err != nil {
+        fmt.Println("Error starting server:", err)
+    }
+}
 `
