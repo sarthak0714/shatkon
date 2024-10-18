@@ -1,4 +1,4 @@
-# Shatkon
+# Shatkon ⬡
 
 Shatkon is a Go package that helps you quickly scaffold a new Go project with customizable configurations for web frameworks, databases, and middleware.
 
