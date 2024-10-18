@@ -2,7 +2,7 @@
 
 Shatkon is a Go package that helps you quickly scaffold a new Go project with customizable configurations for web frameworks, databases, and middleware.
 
-https://github.com/user-attachments/assets/6942a82d-f626-45bf-8e18-a49bb00e0882
+https://github.com/user-attachments/assets/5a384ddd-9884-4e46-9b1b-56684d7102e9
 
 ## Features
 
